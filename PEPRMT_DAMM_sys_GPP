@@ -1,0 +1,90 @@
+function  [GPP_mod] = PEPRMT_DAMM_sys_GPP(param,xdata)
+%param are parameter values--set to 0's if unknown 
+%param=[0,0,0];
+
+%xdata are exogenous variables in 30min temporal resolution
+Time_2 =xdata(:,1);%Day of year variable that runs continuously
+DOY_disc_2=xdata(:,2);%Day of year variable that goes from 1-365; if multiple years are used make sure DOY_disc does not exceed 365
+TA_2 = xdata(:,3);%Air temperature in C
+%WT_2 = xdata(:,4);%Do not need water table height to estimate GPP
+PAR_2 = xdata(:,5);%Photosynthetically active radiation (umol m-2 s-1)
+LAI_2 = xdata(:,6);%Leaf area index
+GPP_2 = xdata(:,7);%observed GPP in umol m-2 s-1--just for comparison
+
+%COMPUTE GPP
+
+%First, divide year into 5 seasons--these seasons are specific to the
+%Sacramento-San Joaquin Delta--determined in separate analysis of wetland phenology
+Season=zeros(1,length(GPP_2))';
+Sel=DOY_disc_2<=88;
+Season(Sel)=1;%WINTER
+Sel=DOY_disc_2<=175&DOY_disc_2>88;
+Season(Sel)=2;%Pre-SPRING
+Sel=DOY_disc_2<=205&DOY_disc_2>175;
+Season(Sel)=3;%SPRING
+Sel=DOY_disc_2<=265&DOY_disc_2>205;
+Season(Sel)=4;%SUMMER
+Sel=DOY_disc_2<=335&DOY_disc_2>265;
+Season(Sel)=5;%FALL
+Sel=DOY_disc_2<=365&DOY_disc_2>335;
+Season(Sel)=1;%WINTER AGAIN
+
+
+GI_fix=zeros(1,length(Time_2));%This variable helps fitting of LAI variable derived from greennes index (Phenocam data)
+%can be ignored if direct measurements of LAI are collected
+for t = 1:length(Time_2);
+    if Season(t)>1&&Season(t)<3 
+        GI_fix(t)=0.5;
+    else
+         GI_fix(t)=1;
+    end
+    if Season(t)>2&&Season(t)<4
+        GI_fix(t)=0.8;
+    end
+     if Season(t)>4
+         GI_fix(t)=0.73;
+     end
+ end
+
+%PARAMETERS
+k=param(1)+0.8;%light extinction coefficient--default is 0.8
+Ha=param(2)+30;%rate of exponential increase of photosynthesis below the optimum temperature (Medlyn et al. 2002)
+Hd=param(3)+100;%rate of decrease of photosynthesis above the optimum temperature  (Medlyn et al. 2002)
+
+%CONSTANTS
+LUE_mean=0.94;%(g C MJ-1) estimated using the ratio of observed growing season GPP to APAR over the 2 growing seasons (Schwalm et al., 2006)
+R_t=0.00831;%universal gas constant
+T_opt = 25 + 274.15;%optimum temp for photosynthesis in Kelvin
+
+%EQUATIONS
+PAR_2_MJ=(PAR_2*0.0002186)*0.001;%convert PAR umol m-2 s-1 to MJ m-2 s-1
+fPAR_2=0.95*(1-exp(-k*LAI_2));%compute FPAR
+APAR_2=fPAR_2.*PAR_2_MJ;%Absorbed PAR in MJ m-2
+
+AirT_K =TA_2+ 274.15;%C to Kelvin
+AirT_K=AirT_K';
+
+max_time = length(TA_2);
+vct=zeros(1,length(Time_2));%placeholder
+GPP_mod=zeros(1,length(Time_2));%modeled GPP
+
+for t = 1:max_time
+exponent1=(Ha*(AirT_K(t)-T_opt))./(AirT_K(t)*R_t*T_opt); %(Medlyn et al. 2002)
+exponent2=(Hd*(AirT_K(t)-T_opt))./(AirT_K(t)*R_t*T_opt);
+top = Hd*exp(exponent1);   
+bottom=Hd-(Ha*(1-exp(exponent2)));
+vct(t) = (top./bottom);
+  if Season(t)<2%when greenness index drops to winter levels almost turn off Ps--due to distinct seasonality in Delta wetlands
+      vct(t)=0.15;
+  end
+GPP_mod(t)=(GI_fix(t)*(vct(t)*(APAR_2(t)*LUE_mean)));%g C m-2 s-1
+end
+GPP_mod=(GPP_mod/12)*10^6*-1;%umol m-2 s-1
+
+figure
+plot(GPP_mod,'.')
+hold on
+plot(GPP_2,'.')
+legend('mod','obs')
+    
+end
