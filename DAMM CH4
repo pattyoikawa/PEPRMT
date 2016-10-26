@@ -1,102 +1,73 @@
-function  pulse_emission_total = PEPRMT_final_sys_CH4(theta,xdata)
+%DAMM CH4 model 
+%Based on Davidson 2012 DAMM model
+%parameterized for restored wetlands in the Sacramento-San Joaquin River
+%Delta
+
+%Written by Patty Oikawa
+%patty.oikawa@gmail.com
+
+%all PEPRMT models use the same input structure (xdata) for CH4 models
+%however not all models use all variables in the structure
+%all variables are at the daily time step
+
+function  pulse_emission_total = PEPRMT_final_sys_CH4(xdata)
 %THis is run at daily time step--all variables in daily time step
 
 %Constants
 R = 8.314;%J K-1 mol-1
-Time_2 =xdata(:,1);
-DOY_disc_2=xdata(:,2);
+Time_2 =xdata(:,1);% day of year
+DOY_disc_2=xdata(:,2);%day of year that starts over every year
 %Exogenous Variables
-TA_2 = xdata(:,3);
-WT_2 = xdata(:,4);%water table height cm
-%PAR_2 = xdata(:,5);
-GPP_2 = xdata(:,6);%output from CO2 PAMM model umol m-2 day-1
-S1_2=xdata(:,7);%output from CO2 PEPRMT model -cummulative umol m-2 SOM
-S2_2=xdata(:,8);%output from CO2 PEPRMT model -cummulative umol m-2 Ps C
-wetland_age_2=xdata(:,9);
-% figure
-% plot(S1_2,'.')
-% hold on
-% plot(S2_2,'.r')
+TA_2 = xdata(:,3);%Air temperature- measured (C)
+WT_2 = xdata(:,4);%water table height (cm) equals 0 when water table at soil surface
+GPP_2 = xdata(:,6);%Modeled GPP - use output from PEPRMT-GPP (umol m-2 day-1)
+S1_2=xdata(:,7);%Modeled SOC pool - use output from PEPRMT Reco model -cummulative umol m-2
+S2_2=xdata(:,8);%Modeled labile C pool - use output from PEPRMT Reco model -cummulative umol m-2
+wetland_age_2=xdata(:,9);%age of wetland in years (whole numbers only)
 
-WT_2_adj=(WT_2/100)+1;%when wt=1 at soil surface
-% figure
-% plot(WT_2_adj)
 
-%Methane seasons
-%First, divide year into seasons, b/c model uses different parameter values
-%depending on time of year
-M_Season=zeros(1,length(GPP_2))';
-Sel=DOY_disc_2<=80;%40
-M_Season(Sel)=1;%winter
-Sel=DOY_disc_2<=200&DOY_disc_2>80;
-M_Season(Sel)=2;%spring
-Sel=DOY_disc_2<=300&DOY_disc_2>200;
-M_Season(Sel)=3;%summer
-Sel=DOY_disc_2<=365&DOY_disc_2>300;%340
-M_Season(Sel)=1;%winter
-% 
-%  figure
-%  plot(M_Season,'r')
-%  hold on
-%  plot(Vtrans,'k.')
-%  hold on
-%  plot(Oxi_factor,'b.')
+WT_2_adj=(WT_2/100)+1;%makes a new variable where wt=1 at soil surface
 
-%THIRD SET UP CH4 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%good starting point --all have Q10=7.4
-%C_allocation=theta(1);
-%S1_2=S1_2*C_allocation;
-%S2_2=S2_2*C_allocation;
-%Vtrans_effect=theta(7);
+%CH4 PARAMETERS
+%SOC pool
+M_alpha1 = 9e10;% umol m-3 s-1
+M_ea1 = (65.2)*1000;% parameter in kJ mol-1; multiplied by 1000 = J mol-1
+M_km1 =1.8e-5;%umol m-3 
+%Labile C pool
+M_alpha2 = 9e11;% umol m-3 s-1
+M_ea2 = (68)*1000;
+M_km2 =1.3e-6;
 
-M_alpha1 = 9e10;% umol m-3 s-1 ; 1.41e13%representing Vmax for all methanogenesis substrates
-M_ea1 = (theta(1)+70)*1000;% parameter in kJ mol-1; multiplied by 1000 = J mol-1
-M_km1 =theta(2)*3e3;%umol m-3 RECAL/OLD
-%M_km1_gCcm3=M_km1*1e-12*12;
-M_alpha2 = 9e11;%1.41e13%representing Vmax for all methanogenesis substrates
-M_ea2 = (theta(3)+70)*1000;%76.25 only 1 Ea
-M_km2 =theta(4)*3e3;%1e3 ; LABILE/NEW
-%M_km2_gCcm3=M_km2*1e-12*12;
+%CH4 oxidation parameters
+M_alpha3 = 9e10;% umol m-3 s-1
+M_ea3 = (59.6)*1000;
+M_km3 =253e-5;%
 
-M_alpha3 = 9e10;%ch4 oxidation following walter 1996+2000
-M_ea3 = (theta(5)+70)*1000;%72 only 1 Ea
-M_km3 =theta(6)*3e3;%
-%M_km3_gCcm3=M_km3*1e-12*12;
+%parameter for hydrodynamic flux
+  k=0.04; %gas transfer velocity(m day-1)
+%parameter for plant-mediated transport
+  Vtrans=0.24;%gas transfer velocity through plants(m d-1)
+Oxi_factor=0.35;%percent oxidized during transport
 
-  k=0.04;%%0.03m d-1;I assume k = constant = 0.1-1 cm h-1 or 0.12 m d-1 at night, averaged across day would be 0.06
-%parameterization for inhibition of ch4 production when WT drops
+%empirical factor for inhibition of ch4 production when WT drops
   beta1=0.48;
   beta2=-0.18;
   beta3=0.0042;
- 
- %for decaying inhibition of CH4 production following flooding
+%empirical factor for decaying inhibition of CH4 production following first
+%flooding of wetland
   zeta1=5.1e-6;%%7.4e-6;
   zeta2=0.00058;
   zeta3=0.11;
-%   M_percent_reduction_2=(zeta1*DOY_disc_2.^2)+(zeta2*DOY_disc_2)+zeta3;%more sensitive
-% figure
-% plot(DOY_disc_2,M_percent_reduction_2,'.')
-%   x=[0 100 200 300 365];
-%   y=[0.1 0.25 0.4 0.75 1];
-%   figure
-%   plot(x,y,'.-')
-
-% Vtrans=theta(4)+0.24;%0.4m d-1; Lower transport rates in winter and spring before canopy is established of year Tian 2001, Kettunen 2003, m d-1
-% Oxi_factor=theta(5)+0.72;%0.3 or 70% of ch4 oxidized in beginning of year
 
   
-  %want GPPmax to reach 100% at max
-GPPmax=max(GPP_2);
+GPPmax=max(GPP_2);%parameter for plant-mediated transport
 
 %Time Invariant
 RT = R .* (TA_2 + 274.15);%T in Kelvin-all units cancel out
-M_Vmax1 = M_alpha1 .* exp(-M_ea1./RT);%umol m-2 s-1 SOM--for acetate only Vmax=0.004 umol m-2 s-1, so with all substrates combined probably closer to 0.04 umol m-2 s-1
-%M_Vmax1 = M_alpha1.^(-M_ea1./RT);%umol m-2 s-1 SOM--for acetate only Vmax=0.004 umol m-2 s-1, so with all substrates combined probably closer to 0.04 umol m-2 s-1
-
-M_Vmax2 = M_alpha2 .* exp(-M_ea2./RT);%umol m-2 s-1 SOM--for acetate only Vmax=0.004 umol m-2 s-1, so with all substrates combined probably closer to 0.04 umol m-2 s-1
-M_Vmax3 = M_alpha3 .* exp(-M_ea3./RT);%umol m-2 s-1 SOM--for acetate only Vmax=0.004 umol m-2 s-1, so with all substrates combined probably closer to 0.04 umol m-2 s-1
-
+M_Vmax1 = M_alpha1 .* exp(-M_ea1./RT);%umol m-2 d-1 
+M_Vmax2 = M_alpha2 .* exp(-M_ea2./RT);
+M_Vmax3 = M_alpha3 .* exp(-M_ea3./RT);
 
 %preallocating space
 S1sol = zeros(1,length(Time_2));
@@ -121,16 +92,15 @@ Vtrans=zeros(1,length(Time_2));
 Oxi_factor=zeros(1,length(Time_2));
 trans2=zeros(1,length(Time_2));
 
-for t = 1:length(Time_2);%at t=1
-    
-  trans2(t)=((GPP_2(t)+(GPPmax))/GPPmax)-1;%unit
+for t = 1:length(Time_2);
+ %parameter for plant-mediated transport--function of GPP
+  trans2(t)=((GPP_2(t)+(GPPmax))/GPPmax)-1;
 if trans2(t)<0
     trans2(t)=0;
 end
 if trans2(t)>1
     trans2(t)=1;
 end
-
 
 
  %following Davidson and using multiple eq for diff substrate pool
@@ -152,23 +122,23 @@ end
 %Empirical eq Oikawa for CH4 inhibition when WT falls below soil
 %surface--if WT below soil surface any time in 10days previous--CH4
 %production reduced
-   if t<=20 && WT_2_adj(t)<1.3%1.1
-    M_percent_reduction(t)=(beta1*WT_2_adj(t).^2)+(beta2*WT_2_adj(t))+beta3;%more sensitive
+   if t<=20 && WT_2_adj(t)<1
+    M_percent_reduction(t)=(beta1*WT_2_adj(t).^2)+(beta2*WT_2_adj(t))+beta3;
    else
     M_percent_reduction(t)=1;
    end
     
    if t>20%20
-    Sel=WT_2_adj(t-19:t);%19
+    Sel=WT_2_adj(t-19:t);
    end
-   if nanmin(Sel)<1.3%1.1
-    M_percent_reduction(t)=(beta1*WT_2_adj(t).^2)+(beta2*WT_2_adj(t))+beta3;%more sensitive
+   if nanmin(Sel)<1
+    M_percent_reduction(t)=(beta1*WT_2_adj(t).^2)+(beta2*WT_2_adj(t))+beta3;
    else
     M_percent_reduction(t)=1;
    end
    
     
-   if WT_2_adj(t)<0.5%used to be -100
+   if WT_2_adj(t)<0
     M_percent_reduction(t)=0;
    end
     
@@ -178,60 +148,27 @@ end
     if M_percent_reduction(t)>1;
     M_percent_reduction(t)=1;
    end
-%       if M_Season(t)>1&&M_Season(t)<3&& WT_2_adj(t)<1.2 %it's spring
-%           M_percent_reduction(t)=M_percent_reduction(t)*0.5;%more inhibition of CH4 production in wintertime when WT is low
-%       else
-%          M_percent_reduction(t)=M_percent_reduction(t);%more inhibition of CH4 production in wintertime when WT is low
-%      end
-%      if M_Season(t)<2&& WT_2_adj(t)<1.2 %it's winter
-%          M_percent_reduction(t)=M_percent_reduction(t)*0.2;%more inhibition of CH4 production in wintertime when WT is low
-%      end
 
 %Empirical eq Oikawa for CH4 inhibition following restoration
    if wetland_age_2(t)<2
-    M_percent_reduction_2(t)=(zeta1*DOY_disc_2(t).^2)+(zeta2*DOY_disc_2(t))+zeta3;%more sensitive
+    M_percent_reduction_2(t)=(zeta1*DOY_disc_2(t).^2)+(zeta2*DOY_disc_2(t))+zeta3;
    else
     M_percent_reduction_2(t)=1;
    end
    if  M_percent_reduction_2(t)>1;
         M_percent_reduction_2(t)=1;
    end
-%seasonal effects on plant transport capabilities and the degree to
-%which CH4 is oxidized during transport
-     if M_Season(t)>1&&M_Season(t)<3 %it's spring
-%Vtrans(t)=0.24+Vtrans_effect;%0.4m d-1; Lower transport rates in winter and spring before canopy is established of year Tian 2001, Kettunen 2003, m d-1
-Vtrans(t)=0.44;%0.4m d-1; Lower transport rates in winter and spring before canopy is established of year Tian 2001, Kettunen 2003, m d-1
-Oxi_factor(t)=0.45;%0.24 or 0.3 or 70% of ch4 oxidized in beginning of year
-     else
-%Vtrans(t)=0.35+Vtrans_effect;%m d-1; higher transport rates later in year Tian 2001, Kettunen 2003, m d-1
-Vtrans(t)=0.24;%0.35 m d-1; higher transport rates later in year Tian 2001, Kettunen 2003, m d-1
-Oxi_factor(t)=0.35;%90% oxidation rates in general for bulrushes Tules and Cattails-Jespersen 1998 and van der nat 98
-     end
-     if M_Season(t)<2 %it's winter
-%Vtrans(t)=0.24+Vtrans_effect;%m d-1; higher transport rates later in year Tian 2001, Kettunen 2003, m d-1
-Vtrans(t)=1;%m d-1; higher transport rates later in year Tian 2001, Kettunen 2003, m d-1
-Oxi_factor(t)=0.05;%0.72 or 35% oxidation rates in general for bulrushes Tules and Cattails-Jespersen 1998 and van der nat 98
-     end
      
-%      figure
-%      plot(Time_2,WT_2_adj,'.')
-%      hold on
-%      plot(Time_2,M_percent_reduction,'.r')
      
     M1(t) = M1(t)*M_percent_reduction(t) ; %umol m2 sec Reaction velocity
     M2(t) = M2(t)*M_percent_reduction(t) ; %umol m2 sec
     M1(t) = M1(t)*M_percent_reduction_2(t); %umol m2 sec Reaction velocity
     M2(t) = M2(t)*M_percent_reduction_2(t); %umol m2 sec
 
-    %S1sol and S2sol are the new som and labile pools adjusted for C lost
+    %S1sol and S2sol are the new SOC and labile pools adjusted for C lost
     %thhru CH4
-%     if (t==1)
         S1sol(t) = S1_2(t) - (M1(t)*60*60*24);%accounts for depletion of C sources in soil due to Reco and methane production
         S2sol(t) = S2_2(t) - (M2(t)*60*60*24);
-%     else
-%         S1sol(t) = (S1sol(t-1)+S1_2(t)) - (M1(t)*60*60*24);
-%         S2sol(t) = (S2sol(t-1)+S2_2(t))- (M2(t)*60*60*24);
-%     end
     
     if S1sol(t)<0
         S1sol(t)=0;
@@ -239,27 +176,11 @@ Oxi_factor(t)=0.05;%0.72 or 35% oxidation rates in general for bulrushes Tules a
     if S2sol(t)<0
         S2sol(t)=0;
     end
-%         figure
-%     plot(S1sol,'.')
-%     hold on
-%     plot(S2sol,'.r')
-%     hold on
-%     plot(S1_2,'.g')
-%     hold on
-%     plot(S2_2,'.k')
-%         figure
-%     plot(M1,'.')
-%     hold on
-%     plot(M2,'.r')
-
    
    M_full(t)=(M1(t)*60*60*24)+(M2(t)*60*60*24);%total CH4 produced at this time step in umol m-3 soil day-1
 
- 
 
 %NOW COMPUTE CH4 TRANSPORT %%%%%%%%%%%%%%
-%for plant mediated transport--
-%trans2 = parameter adjusting fluxes high when plants are active
 
 %make sure WT_2_adj is never negative
 if WT_2_adj(t)<0
@@ -274,10 +195,10 @@ end
       R_Oxi(t) = 0;
       Oxi_full(t)=0;%umol m-3 d-1
       
-      %This assumes you start out the year with typical CH4 concentrations in water
+      %This assumes you start out the year with no CH4 in water
       %where CH4water_0 is the initial concentration of CH4 in water
-      CH4water_0(t)=15000;%100 umol m-3 = 0.1 umol L-1; typical low concentration for CH4 in delta wetland water
-      CH4water_0_2(t)=0;
+      CH4water_0(t)=0;% umol m-3
+      CH4water_0_2(t)=0;%CH4 produced in previous time step
       %Only modeling CH4 dissolved in the water that goes down 1 m3 into
       %soil
       CH4water(t)= ((M_full(t)*1)+(CH4water_0(t)*WT_2_adj(t)))/ WT_2_adj(t);%umol per m^3 - concentration in water doesn't change
@@ -285,8 +206,8 @@ end
       %based on the concentrations in the soil and water, you get hydro and
       %plant-mediated fluxes
       Hydro_flux(t)=k*CH4water(t);  %umol m-3 30min-1; Hydrodynamic flux Poindexter
-      Plant_flux(t)=(Vtrans(t)*CH4water(t))*trans2(t);  %umol m-3 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
-      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor(t);  %umol m-3 30min-1; Plant mediated transport after oxidation
+      Plant_flux(t)=(Vtrans*CH4water(t))*trans2(t);  %umol m-3 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor;  %umol m-3 30min-1; Plant mediated transport after oxidation
 
       %subtract the moles of methane lost from the pools (soil and
       %water) to the atm
@@ -310,8 +231,8 @@ end
       %this hydroflux uses a 2nd k parameter which basically inhibits
       %diffusive flux when there is no water above the soil surface
       Hydro_flux(t)=k*CH4water(t);  %umol m-3 30min-1; Hydrodynamic flux Poindexter
-      Plant_flux(t)=(Vtrans(t)*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
-      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor(t);  %umol m-2 30min-1; Plant mediated transport after oxidation
+      Plant_flux(t)=(Vtrans*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor;  %umol m-2 30min-1; Plant mediated transport after oxidation
 
       CH4water_store(t)=CH4water(t)-Plant_flux(t)-Hydro_flux(t); %umol m-3 stored in the system
             
@@ -334,8 +255,8 @@ end
       
       %again compute fluxes
       Hydro_flux(t)=k*CH4water(t);  %umol m-2 30min-1; Hydrodynamic flux Poindexter
-      Plant_flux(t)=(Vtrans(t)*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
-      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor(t);  %umol m-2 30min-1; Plant mediated transport after oxidation
+      Plant_flux(t)=(Vtrans*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor;  %umol m-2 30min-1; Plant mediated transport after oxidation
      
       %subtract the moles of methane lost from the pools (soil and
       %water) to the atm
@@ -366,9 +287,5 @@ end
   end
 end
 pulse_emission_total=Plant_flux_net+Hydro_flux;%umol CH4 m-2 day-1; total CH4 flux to atm
-
-
-
-
 
 end
