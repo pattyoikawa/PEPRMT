@@ -1,0 +1,163 @@
+%DAMM Reco model 
+%Based on Davidson 2012 DAMM model
+%parameterized for restored wetlands in the Sacramento-San Joaquin River
+%Delta
+
+%Written by Patty Oikawa
+%patty.oikawa@gmail.com
+
+%all PEPRMT models use the same input structure (xdata) for CO2 models
+%however not all models use all variables in the structure
+%all variables are at the 30min time step
+
+function  [NEE_mod, S1, S2, Reco_1] = PEPRMT_DAMM_sys_Reco(xdata)
+%Exogenous Variables
+Time_2 =xdata(:,1);% day of year
+TA_2 = xdata(:,3);%Air temperature- measured (C)
+WT_2 = xdata(:,4);%water table height (cm) equals 0 when water table at soil surface
+GPP_2 = xdata(:,6);%Modeled GPP - use output from PEPRMT-GPP (umol m-2 day-1)
+Season_drop_2=xdata(:,9);%Season: 1=winter; 2=spring, 3=summer; 4=fall
+wetland_age_2=xdata(:,12);%age of wetland in years (whole numbers only)
+
+%Static C allocation theme
+NPPsum_avail_2 = (GPP_2*-1*60*30)*0.5;%umol m-2 30min-1 --give Reco access to half GPP
+
+%SET UP Reco%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%SOC
+alpha1 = 3e3;%umol m-2 s-1,--SET AS CONSTANT
+ea1 = 18.5*1000; 
+km1 = 0.0018; % umol C m-3 soil Km for SOC pool
+%labile C
+alpha2 = 3e3;%--SET AS CONSTANT
+ea2 = 17.2*1000; 
+km2 = 0.008; % umol C m-3 soil Km for labile C pool
+
+%initialize C pools
+C1_init = 3e9;%total C  in umol m-3
+C2_init = 0;
+
+%Empirical function :Reco inhibited when WT high
+  a1=0.00033;
+  a2=0.0014;
+  a3=0.75;
+
+%Time Invariant
+R = 8.314;%J K-1 mol-1
+RT = R .* (TA_2 + 274.15);%T in Kelvin-all units cancel out
+Vmax1 = alpha1 .* exp(-ea1./RT);%umol m-2 s-1 SOC
+Vmax2 = alpha2 .* exp(-ea2./RT);%umol m-2 s-1 labile
+
+%preallocating space
+S1sol = zeros(1,length(Time_2));
+S2sol = zeros(1,length(Time_2));
+R1 = zeros(1,length(Time_2));
+R2 = zeros(1,length(Time_2));
+S1=zeros(1,length(Time_2));
+S2=zeros(1,length(Time_2));
+percent_reduction=zeros(1,length(Time_2));
+Reco_1=zeros(1,length(Time_2));
+Reco_full=zeros(1,length(Time_2));
+C2in=zeros(1,length(Time_2));
+percent_available=zeros(1,length(Time_2));
+
+
+
+for t = 1:length(Time_2);
+    
+%C allocation
+    C2in(t) = NPPsum_avail_2(t);
+
+    if t == 1 
+        S1(t) = C1_init ;%SOC pool
+        S2(t) = C2_init + C2in(t) ; %labile C pool
+    else
+        S1(t) = S1sol(t-1);
+        S2(t) = S2sol(t-1);
+    end
+    
+    %Empirical factor for increased availability of SOC during the first 3 yrs following restoration
+   if wetland_age_2(t)<4
+    percent_available(t)=0.5;
+   else
+    percent_available(t)=0.2;
+   end
+    S1(t) = S1(t)*percent_available(t) ; 
+
+
+ %following Davidson and using multiple eq for diff substrate pools
+    R1(t) = Vmax1(t) .* S1(t) ./(km1 + S1(t)); %umol m2 sec Reaction velocity
+    R2(t) = Vmax2(t) .* S2(t) ./(km2 + S2(t)); %umol m2 sec   
+    if R1(t)<0
+        R1(t)=0;
+    end
+    if R2(t)<0
+        R2(t)=0;
+    end
+ 
+%Reco is reduced by 25% when WT is at or above soil surface
+%--McNicol Silver 2015
+
+    percent_reduction(t)=(a1*WT_2(t).^2)-(a2*WT_2(t))+a3;
+if WT_2(t)>0
+    percent_reduction(t)=0.75;
+end
+    
+if percent_reduction(t)>1
+   percent_reduction(t)=1;
+end
+if percent_reduction(t)<0.75
+   percent_reduction(t)=0.75;
+end
+
+    
+    R1(t) = R1(t)*percent_reduction(t) ; %umol m2 sec Reaction velocity
+    R2(t) = R2(t)*percent_reduction(t); %umol m2 sec
+    
+    if (t==1)
+        S1sol(t) = C1_init - (R1(t)*60*30);%accounts for depletion of C sources in soil due to Reco
+        S2sol(t) = (C2_init+C2in(t)) - (R2(t)*60*30);
+    else
+        S1sol(t) = S1sol(t-1) - (R1(t)*60*30);
+        S2sol(t) = (S2sol(t-1)+C2in(t))- (R2(t)*60*30);
+    end
+    if S1sol(t)<0
+        S1sol(t)=0;
+    end
+    if S2sol(t)<0
+        S2sol(t)=0;
+    end
+    
+if Season_drop_2(t)>3%in autumn time, labile PS C pool empties into SOM
+    
+        S1sol(t) = S1sol(t)+(0.2*S2sol(t));%move part of labile C into SOM pool--mimicing plant matter dying
+        S2sol(t) = S2sol(t)-(0.2*S2sol(t));
+end
+
+if Season_drop_2(t)<2%in winter time or season 1, labile PS C pool empties into SOM
+    
+        S1sol(t) = S1sol(t)+(S2sol(t));%move entire labile C into SOM pool--mimicing plant matter dying
+        S2sol(t) = 0;
+end
+    
+   Reco_1(t) = R1(t) + R2(t); %umol m-2 s-1
+   Reco_full(t) = (R1(t)*60*30) + (R2(t)*60*30); %umol m2 30min
+end
+NEE_mod=GPP_2'+Reco_1;%umol m-2 s-1
+
+end
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
