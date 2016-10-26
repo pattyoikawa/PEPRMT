@@ -1,0 +1,261 @@
+% TP-GPP empirical CH4 model 
+%following Migliavacca 2011, Raich 2002, Reichstein 2003
+%parameterized for restored wetlands in the Sacramento-San Joaquin River
+%Delta
+
+%Written by Patty Oikawa
+%patty.oikawa@gmail.com
+
+%all PEPRMT models use the same input structure (xdata) for CH4 models
+%however not all models use all variables in the structure
+%all variables are at the daily time step
+
+
+function  pulse_emission_total = PEPRMT_TPGPP_sys_CH4(xdata)
+%THis is run at daily time step--all variables in daily time step
+
+%Constants
+R = 8.314;%J K-1 mol-1
+Time_2 =xdata(:,1);% day of year
+DOY_disc_2=xdata(:,2);%day of year that starts over every year
+%Exogenous Variables
+TA_2 = xdata(:,3);%Air temperature- measured (C)
+WT_2 = xdata(:,4);%water table height (cm) equals 0 when water table at soil surface
+GPP_2 = xdata(:,6);%Modeled GPP - use output from PEPRMT-GPP (umol m-2 day-1)
+wetland_age_2=xdata(:,9);%age of wetland in years (whole numbers only)
+
+WT_2_adj=(WT_2/100)+1;%makes a new variable where wt=1 at soil surface
+
+
+%CH4 PARAMETERS
+Mref=0.38;%Reco at T=15C when LAI=0
+Eo=485;
+k2=0.0083;
+
+Tref=288.15;%Ref temp = 15C
+To=227.13;
+AirT_K =TA_2+ 274.15;%C to Kelvin
+AirT_K=AirT_K';
+
+
+%CH4 oxidation parameters
+M_alpha3 = 9e10;%ch4 oxidation following walter 1996+2000
+M_ea3 = 59.6*1000;
+M_km3 = 253e-5;
+
+%parameter for hydrodynamic flux
+  k=0.04; %gas transfer velocity(m day-1)
+%parameter for plant-mediated transport
+  Vtrans=0.24;%gas transfer velocity through plants(m d-1)
+Oxi_factor=0.35;%percent oxidized during transport
+
+%empirical factor for inhibition of ch4 production when WT drops
+  beta1=0.48;
+  beta2=-0.18;
+  beta3=0.0042;
+%empirical factor for decaying inhibition of CH4 production following first
+%flooding of wetland
+  zeta1=5.1e-6;%%7.4e-6;
+  zeta2=0.00058;
+  zeta3=0.11;
+
+  
+GPPmax=max(GPP_2);%parameter for plant-mediated transport
+
+%Time Invariant
+RT = R .* (TA_2 + 274.15);%T in Kelvin-all units cancel out
+M_Vmax3 = M_alpha3 .* exp(-M_ea3./RT);%umol m-2 d-1 
+
+
+%preallocating space
+M_percent_reduction=zeros(1,length(Time_2));
+M_percent_reduction_2=zeros(1,length(Time_2));
+M2 = zeros(1,length(Time_2));
+M_full=zeros(1,length(Time_2));
+
+CH4water=zeros(1,length(Time_2));
+Hydro_flux=zeros(1,length(Time_2));
+Plant_flux=zeros(1,length(Time_2));
+Plant_flux_net=zeros(1,length(Time_2));
+CH4water_store=zeros(1,length(Time_2));
+CH4water_0=zeros(1,length(Time_2));
+Oxi_full=zeros(1,length(Time_2));
+R_Oxi=zeros(1,length(Time_2));
+CH4water_0_2=zeros(1,length(Time_2));
+Vtrans=zeros(1,length(Time_2));
+Oxi_factor=zeros(1,length(Time_2));
+trans2=zeros(1,length(Time_2));
+
+for t = 1:length(Time_2);
+    
+
+    %CH4 production--only 1 pool
+    M2(t) = (Mref+k2*GPP_2(t))*exp(Eo*((1/(Tref-To))-(1/(AirT_K(t)-To))));
+
+    if M2(t)<0
+        M2(t)=0;
+    end
+    
+%Empirical eq Oikawa for CH4 inhibition when WT falls below soil
+%surface--if WT below soil surface any time in 10days previous--CH4
+%production reduced
+   if t<=20 && WT_2_adj(t)<1
+    M_percent_reduction(t)=(beta1*WT_2_adj(t).^2)+(beta2*WT_2_adj(t))+beta3;%more sensitive
+   else
+    M_percent_reduction(t)=1;
+   end
+    
+   if t>20
+    Sel=WT_2_adj(t-19:t);
+   end
+   if nanmin(Sel)<1
+    M_percent_reduction(t)=(beta1*WT_2_adj(t).^2)+(beta2*WT_2_adj(t))+beta3;%more sensitive
+   else
+    M_percent_reduction(t)=1;
+   end
+   
+   if WT_2_adj(t)<0
+    M_percent_reduction(t)=0;
+   end
+    
+   if M_percent_reduction(t)<0;
+    M_percent_reduction(t)=0;
+   end
+    if M_percent_reduction(t)>1;
+    M_percent_reduction(t)=1;
+   end
+
+    %Empirical eq Oikawa for CH4 inhibition following restoration
+   if wetland_age_2(t)<2
+    M_percent_reduction_2(t)=(zeta1*DOY_disc_2(t).^2)+(zeta2*DOY_disc_2(t))+zeta3;
+   else
+    M_percent_reduction_2(t)=1;
+   end
+   if  M_percent_reduction_2(t)>1;
+        M_percent_reduction_2(t)=1;
+   end
+     
+     
+    M2(t) = M2(t)*M_percent_reduction(t) ; %umol m2 sec
+    M2(t) = M2(t)*M_percent_reduction_2(t); %umol m2 sec   
+
+   M_full(t)=M2(t)*60*60*24;%total CH4 produced at this time step in umol m-3 soil day-1
+
+ %parameter for plant-mediated transport--function of GPP
+   trans2(t)=((GPP_2(t)+(GPPmax))/GPPmax)-1;%unit
+if trans2(t)<0
+    trans2(t)=0;
+end
+if trans2(t)>1
+    trans2(t)=1;
+end
+
+%NOW COMPUTE CH4 TRANSPORT %%%%%%%%%%%%%%
+
+%make sure WT_2_adj is never negative
+if WT_2_adj(t)<0
+   WT_2_adj(t)=0;
+end
+
+%now start ch4 transport loop
+  if t==1
+      if WT_2_adj(t)>1 %WT_2_adj = 1 at soil surface
+          
+      %Methane oxidation is zero when WT above surface
+      R_Oxi(t) = 0;
+      Oxi_full(t)=0;%umol m-3 d-1
+      
+      %This assumes you start out the year with no CH4 in water
+      %where CH4water_0 is the initial concentration of CH4 in water
+      CH4water_0(t)=0;% umol m-3
+      CH4water_0_2(t)=0;%CH4 produced in previous time step
+      %Only modeling CH4 dissolved in the water that goes down 1 m3 into
+      %soil
+      CH4water(t)= ((M_full(t)*1)+(CH4water_0(t)*WT_2_adj(t)))/ WT_2_adj(t);%umol per m^3 - concentration in water doesn't change
+
+      %based on the concentrations in the soil and water, you get hydro and
+      %plant-mediated fluxes
+      Hydro_flux(t)=k*CH4water(t);  %umol m-3 30min-1; Hydrodynamic flux Poindexter
+      Plant_flux(t)=(Vtrans*CH4water(t))*trans2(t);  %umol m-3 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor;  %umol m-3 30min-1; Plant mediated transport after oxidation
+
+      %subtract the moles of methane lost from the pools (soil and
+      %water) to the atm
+      CH4water_store(t)=CH4water(t)-Hydro_flux(t)-Plant_flux(t); %umol m-3 stored in the system
+     
+      else  
+      %If you start out the year with no water above the surface
+      
+      %gives CH4 concentration in water which is now less that 1 m33
+      CH4water_0(t)=(M_full(t)*1)+(0.00001*WT_2_adj(t))/WT_2_adj(t);%umol per m^3 - concentration in soil and water are the same
+
+      %Methane oxidation turns on when WT falls below the surface
+      R_Oxi(t) = M_Vmax3(t) .* CH4water_0(t) ./(M_km3 + CH4water_0(t)) ; %umol m2 sec Reaction velocity
+      Oxi_full(t)=R_Oxi(t)*60*60*24;%umol m-3 d-1
+      CH4water(t)=CH4water_0(t)-Oxi_full(t);%now you have less ch4
+      if CH4water(t)<0
+          CH4water(t)=0;
+      end
+      CH4water_0_2(t)=0;
+      
+      %this hydroflux uses a 2nd k parameter which basically inhibits
+      %diffusive flux when there is no water above the soil surface
+      Hydro_flux(t)=k*CH4water(t);  %umol m-3 30min-1; Hydrodynamic flux Poindexter
+      Plant_flux(t)=(Vtrans*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor;  %umol m-2 30min-1; Plant mediated transport after oxidation
+
+      CH4water_store(t)=CH4water(t)-Plant_flux(t)-Hydro_flux(t); %umol m-3 stored in the system
+            
+      end
+  
+  else
+      if WT_2_adj(t)>1  %if you have water, then the CH4 should mix between the 2 layers and concentrations should be the same in water and soil
+      
+      %account for any changes in concentration of CH4 due to any change in
+      %WT_2_adj height
+      CH4water_0(t)=(CH4water_store(t-1) * WT_2_adj(t-1)) / WT_2_adj(t);
+      
+      %Methane oxidation is zero when WT above surface
+      R_Oxi(t) = 0;
+      Oxi_full(t)=0;%umol m-3 d-1
+      CH4water_0_2(t)=0;
+      %Now add the new CH4 produced today to the soil and let it increase
+      %in concentration
+      CH4water(t)= ((M_full(t)*1)+(CH4water_0(t)*WT_2_adj(t)))/ WT_2_adj(t);%umol per m^3 - concentration in water doesn't change
+      
+      %again compute fluxes
+      Hydro_flux(t)=k*CH4water(t);  %umol m-2 30min-1; Hydrodynamic flux Poindexter
+      Plant_flux(t)=(Vtrans*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor;  %umol m-2 30min-1; Plant mediated transport after oxidation
+     
+      %subtract the moles of methane lost from the pools (soil and
+      %water) to the atm
+      CH4water_store(t)=CH4water(t)-Plant_flux(t)-Hydro_flux(t); %umol m-3 stored in the system
+          
+      else
+      %if you don't have WT_2_adj above the soil, then all the CH4 in the water goes to the soil
+      %First, account for increased concentration of CH4 in soil now that WT_2_adj has dropped
+      CH4water_0(t)=(CH4water_store(t-1) * WT_2_adj(t-1)) / WT_2_adj(t);
+    
+      %now add new CH4 to this new concentrated pool of CH4 in the soil
+      CH4water_0_2(t)= ((M_full(t)*1)+(CH4water_0(t)*WT_2_adj(t)))/ WT_2_adj(t);%umol per m^3 - concentration in water doesn't change
+
+      %Methane oxidation turns on when WT falls below the surface
+      R_Oxi(t) = M_Vmax3(t) .* CH4water_0_2(t) ./(M_km3 + CH4water_0_2(t)) ; %umol m2 sec Reaction velocity
+      Oxi_full(t)=R_Oxi(t)*60*60*24;%umol m-3 day-1
+      CH4water(t)=CH4water_0_2(t)-Oxi_full(t);%now you have less ch4
+      if CH4water(t)<0
+          CH4water(t)=0;
+      end
+
+      Hydro_flux(t)=k*CH4water(t);  %umol m-3 30min-1; Hydrodynamic flux Poindexter
+      Plant_flux(t)=(Vtrans(t)*CH4water(t))*trans2(t);  %umol m-2 30min-1; Plant mediated transport Tian 2001--which just uses CH4 in soil
+      Plant_flux_net(t)=Plant_flux(t)*Oxi_factor(t);  %umol m-2 30min-1; Plant mediated transport after oxidation
+
+      CH4water_store(t)=CH4water(t)-Plant_flux(t)-Hydro_flux(t); %umol m-3 stored in the system
+      end
+  end
+end
+pulse_emission_total=Plant_flux_net+Hydro_flux;%umol CH4 m-2 day-1; total CH4 flux to atm
+
+end
