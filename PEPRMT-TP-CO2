@@ -23,7 +23,7 @@ WT_2 = xdata(:,4);%water table height cm
 AirT_K=TA_2+274.15;
 AirT_K=AirT_K';
 
-%COMPUTE GPP%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 %Reco inhibited when WT high
   a1=0.00033;
   a2=0.0014;
@@ -53,13 +53,13 @@ if WT_2(t)>5
     percent_reduction(t)=0.75;
 end
     
-if percent_reduction(t)>1.25
-   percent_reduction(t)=1.25;
+if percent_reduction(t)>1
+   percent_reduction(t)=1;
 end
 if percent_reduction(t)<0.75
    percent_reduction(t)=0.75;
 end
-    R2(t) = R2(t)*percent_reduction(t); %umol m2 sec
+   R2(t) = R2(t)*percent_reduction(t); %umol m2 sec
      
 
    Reco(t) = R2(t); %umol CO2 m-2 s-1
