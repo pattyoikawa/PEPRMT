@@ -1,0 +1,83 @@
+% TP-GPP empirical Reco model 
+%following Migliavacca 2011, Raich 2002, Reichstein 2003
+%parameterized for restored wetlands in the Sacramento-San Joaquin River
+%Delta
+
+%Written by Patty Oikawa
+%patty.oikawa@gmail.com
+
+%all PEPRMT models use the same input structure (xdata) for CO2 models
+%however not all models use all variables in the structure
+%all variables are at the 30min time step
+
+function  Reco = PEPRMT_TPGPP_sys_Reco(xdata)
+
+%INPUTS
+Time_2 =xdata(:,1);%decimal day of year
+TA_2 = xdata(:,3);%Air temperature- measured (C)
+WT_2 = xdata(:,4);%water table height (cm) equals 0 when water table at soil surface
+GPP_2 = xdata(:,7);%Modeled GPP - use output from PEPRMT-GPP
+
+
+AirT_K =TA_2+ 274.15;%C to Kelvin
+AirT_K=AirT_K';
+
+
+%Static C allocation theme
+GPPsum_avail_2 = (GPP_2*-1*60*30)*0.5;%umol m-2 30min-1 --give Reco access to half GPP
+
+%Reco inhibited when WT high
+  a1=0.00033;
+  a2=0.0014;
+  a3=0.75;
+
+%Reco PARAMETERS
+Rref=1.77;%Reco at T=15C when LAI=0
+Eo=111.5;
+k2=0.10;
+
+Tref=288.15;%Ref temp = 15C
+To=227.13;
+
+
+%preallocating space
+R2 = zeros(1,length(Time_2));
+Reco=zeros(1,length(Time_2));
+C2in=zeros(1,length(Time_2));
+percent_reduction=zeros(1,length(Time_2));
+
+
+%begin loop
+for t = 1:length(Time_2);%at t=1
+    
+%C allocation
+    C2in(t)= GPPsum_avail_2(t);
+
+ %following Migliavacca 2011, Raich 2002, Reichstein 2003
+    R2(t) = (Rref+k2*C2in(t))*exp(Eo*((1/(Tref-To))-(1/(AirT_K(t)-To))));
+    
+%Empirical fxn, Reco increases when WT drops
+  percent_reduction(t)=(a1*WT_2(t).^2)-(a2*WT_2(t))+a3;
+if WT_2(t)>0
+    percent_reduction(t)=0.75;
+end
+    
+if percent_reduction(t)>1
+   percent_reduction(t)=1;
+end
+if percent_reduction(t)<0.75
+   percent_reduction(t)=0.75;
+end
+
+    
+    R2(t) = R2(t)*percent_reduction(t); %umol m2 sec
+    
+
+    
+   Reco(t) = R2(t); %Ecosystem respiration (umol CO2 m-2 s-1)
+   
+
+end
+
+
+end
